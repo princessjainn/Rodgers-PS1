@@ -1,132 +1,7 @@
 import * as vscode from 'vscode';
 import ignore from 'ignore';
-import * as ts from 'typescript';
-
-// Define our expansive vulnerability scanning rules based on the newly provided categories
-const vulnerabilityRules = [
-	// CATEGORY 5: PII Handling
-	{
-		id: 'pii-logging',
-		regex: /console\.(log|info|warn|error)\s*\([^)]*(email|phone|aadhaar|ssn|password|location|dob|user)[^)]*\)/gi,
-		message: 'GDPR / SOC2 Risk: Logging sensitive data (PII).',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	{
-		id: 'pii-storage',
-		regex: /(?:save|store|insert|update)\s*\([^)]*(password|ssn|aadhaar)[^)]*\)/gi,
-		message: 'GDPR / SOC2 Risk: Unencrypted storage of sensitive data.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	// CATEGORY 6: AI Cost Explosion Risks
-	{
-		id: 'ai-loop',
-		regex: /(?:for|while|foreach)\s*\([^)]*\)\s*\{[^}]*(?:callOpenAI|openai|anthropic|fetch|generateText)[^}]*\}/gi,
-		message: 'Unbounded AI Cost Risk: LLM API call inside a loop without obvious limits or caching.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	// CATEGORY 7: Error Handling Failures
-	{
-		id: 'missing-error-handling',
-		regex: /await\s+(?:fetch|axios\.(?:get|post|put|delete)|callOpenAI)/g,
-		message: 'Reliability Risk: Ensure this await call is wrapped in a try/catch or has proper retry/fallback logic.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Warning'
-	},
-	// CATEGORY 8: Network & API Security
-	{
-		id: 'http-url',
-		regex: /http:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^\s"'><]+/gi,
-		message: 'Network Exposure Risk: Usage of insecure HTTP URL instead of HTTPS.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	{
-		id: 'open-cors',
-		regex: /Access-Control-Allow-Origin\s*:\s*(?:'|")?\*(?:'|")?/gi,
-		message: 'Network Exposure Risk: Open CORS policy (*).',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	// CATEGORY 9: Database Risks
-	{
-		id: 'sql-injection',
-		regex: /(?:'|")SELECT\s+.*\s+FROM\s+.*\s+WHERE\s+.*(?:'|")\s*\+/gi,
-		message: 'Injection Vulnerability: Potential SQL injection. Avoid string concatenation for SQL queries.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	{
-		id: 'sql-injection-template',
-		regex: /SELECT.*FROM.*WHERE.*=.*\$\{.*\}/g,
-		message: 'Injection Vulnerability: Potential SQL Injection: Unsanitized variable in SQL query.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	// CATEGORY 10: Observability Failure
-	{
-		id: 'observability-failure',
-		regex: /console\.(error|warn)\s*\(/g,
-		message: 'Operational Visibility Risk: Recommend using a dedicated monitoring/logging framework instead of raw console methods in production.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Information,
-		displaySeverity: 'Info'
-	},
-	// CATEGORY 12: Environment Misconfiguration
-	{
-		id: 'env-isolation',
-		regex: /[a-zA-Z0-9_]*(?:password|secret|api_?key|apikey|token|auth_?key)[a-zA-Z0-9_]*\s*[:=]\s*(?:["'`][^"'`\r\n]+["'`]|(?!(?:true|false|null|undefined|process)\b)[a-zA-Z0-9_\-]{5,})/gi,
-		message: 'Environment Isolation Risk: Potential production keys or secrets hardcoded in source.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	{
-		id: 'dev-config-prod',
-		regex: /process\.env\.NODE_ENV\s*(?:===|==)\s*['"]development['"]/g,
-		message: 'Environment Isolation Risk: Dev configurations potentially exposed in production paths.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Warning'
-	},
-	// CATEGORY 13: Exposed Debug Features
-	{
-		id: 'debug-exposure',
-		regex: /(?:console\.log\s*\(\s*(?:token|password|secret|key)\s*\)|debug\s*=\s*true|\/test-route)/gi,
-		message: 'Debug Exposure: Exposed debug features or sensitive logging.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	// CATEGORY 14: AI Data Leakage
-	{
-		id: 'ai-data-leakage',
-		regex: /(?:prompt|messages).*?(?:schema|logs|user_data|PII)/gi,
-		message: 'Sensitive Context Leakage: AI tools might accidentally expose context like database schema or PII.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	// EXTRAS From Before
-	{
-		id: 'eval-usage',
-		regex: /eval\s*\(/g,
-		message: 'Usage of eval() is a severe security risk.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Error'
-	},
-	{
-		id: 'dangerously-set-inner-html',
-		regex: /dangerouslySetInnerHTML/g,
-		message: 'Usage of dangerouslySetInnerHTML can lead to XSS attacks.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Warning,
-		displaySeverity: 'Warning'
-	},
-	{
-		id: 'insecure-random',
-		regex: /Math\.random\s*\(/g,
-		message: 'Math.random() is not cryptographically secure.',
-		vscodeSeverity: vscode.DiagnosticSeverity.Information,
-		displaySeverity: 'Info'
-	}
-];
+import { runAudit } from './orchestrator/agentOrchestrator';
+import { WorkspaceFile } from './types/vulnerability';
 
 export function activate(context: vscode.ExtensionContext) {
 	const diagnosticCollection = vscode.languages.createDiagnosticCollection('readyornot');
@@ -155,8 +30,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// Trigger initial load
 	loadGitignore();
 
-	// Scan a single document
-	function scanDocument(document: vscode.TextDocument) {
+	// Scan a single document securely via Agent architecture
+	async function scanDocument(document: vscode.TextDocument) {
 		if (document.uri.scheme !== 'file') {
 			return 0;
 		}
@@ -176,117 +51,35 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 
-		// Skip files that aren't likely code or env files
-		const isCode = document.uri.fsPath.match(/\.(ts|js|jsx|tsx|json|html|css|py|java|c|cpp|go|rb|php)$/i);
-		const isEnv = document.uri.fsPath.match(/\.env(\.[a-zA-Z0-9_-]+)?$/i);
-		if (!isCode && !isEnv) {
-			return 0;
-		}
+		const workspaceFile: WorkspaceFile = {
+			uri: document.uri.toString(),
+			fsPath: document.uri.fsPath,
+			content: document.getText()
+		};
 
-		const text = document.getText();
+		const auditReport = await runAudit([workspaceFile]);
 		const diagnostics: vscode.Diagnostic[] = [];
-		let vulnerabilities = 0;
 
-		// CATEGORY 11: Architecture Red Flags - massive single files
-		if (document.lineCount > 1000) {
-			const range = new vscode.Range(0, 0, 0, 1);
-			const diagnostic = new vscode.Diagnostic(range, 'Architecture Fragility: Massive single file detected (>1000 lines). Break this down into smaller components.', vscode.DiagnosticSeverity.Warning);
-			diagnostic.code = 'architecture-fragility';
-			diagnostic.source = 'ReadyOrNot';
+		for (const finding of auditReport.vulnerabilities) {
+			const lineIndex = Math.max(0, finding.line - 1);
+			if (lineIndex >= document.lineCount) continue;
+
+			const lineText = document.lineAt(lineIndex).text;
+			const range = new vscode.Range(lineIndex, 0, lineIndex, lineText.length || 1);
+
+			let vsSeverity = vscode.DiagnosticSeverity.Information;
+			if (finding.severity === 'ERROR') vsSeverity = vscode.DiagnosticSeverity.Warning;
+			else if (finding.severity === 'WARNING') vsSeverity = vscode.DiagnosticSeverity.Warning;
+
+			const msg = `[${finding.title}] ${finding.description}\nFix: ${finding.recommendation}`;
+			const diagnostic = new vscode.Diagnostic(range, msg, vsSeverity);
+			diagnostic.code = finding.id;
+			diagnostic.source = `ReadyOrNot [${finding.agentSource}]`;
 			diagnostics.push(diagnostic);
-			vulnerabilities++;
-		}
-
-		// CATEGORY 11: Architecture Red Flags - business logic/DB in frontend
-		if (document.uri.fsPath.match(/\.(jsx|tsx)$/i)) {
-			if (/import\s+.*\s+from\s+['"](?:pg|mysql|sqlite3|typeorm|mongoose)['"]/gi.test(text)) {
-				const range = new vscode.Range(0, 0, 0, 1);
-				const diagnostic = new vscode.Diagnostic(range, 'Architecture Fragility: Direct database calls or imports detected from client/frontend components.', vscode.DiagnosticSeverity.Warning);
-				diagnostic.code = 'architecture-fragility-db';
-				diagnostic.source = 'ReadyOrNot';
-				diagnostics.push(diagnostic);
-				vulnerabilities++;
-			}
-		}
-
-		// JS/TS AST Parsing for higher accuracy rules
-		let astReportedIds = new Set<string>();
-		if (document.uri.fsPath.match(/\.(ts|js|jsx|tsx)$/i)) {
-			try {
-				const sourceFile = ts.createSourceFile(
-					document.uri.fsPath,
-					text,
-					ts.ScriptTarget.Latest,
-					true
-				);
-
-				const visit = (node: ts.Node) => {
-					// Detect usage of eval()
-					if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'eval') {
-						const startPos = document.positionAt(node.getStart(sourceFile));
-						const endPos = document.positionAt(node.getEnd());
-						const range = new vscode.Range(startPos, endPos);
-
-						const rule = vulnerabilityRules.find(r => r.id === 'eval-usage');
-						if (rule) {
-							const diagnostic = new vscode.Diagnostic(range, rule.message, rule.vscodeSeverity);
-							diagnostic.code = rule.id;
-							diagnostic.source = 'ReadyOrNot';
-							diagnostics.push(diagnostic);
-							vulnerabilities++;
-							// To avoid duplicate from regex later:
-							// We can track the ranges or just skip the regex for this ID
-						}
-					}
-
-					// Detect unexpectedly dangerouslySetInnerHTML
-					if (ts.isJsxAttribute(node) && node.name.getText(sourceFile) === 'dangerouslySetInnerHTML') {
-						const startPos = document.positionAt(node.getStart(sourceFile));
-						const endPos = document.positionAt(node.getEnd());
-						const range = new vscode.Range(startPos, endPos);
-
-						const rule = vulnerabilityRules.find(r => r.id === 'dangerously-set-inner-html');
-						if (rule) {
-							const diagnostic = new vscode.Diagnostic(range, rule.message, rule.vscodeSeverity);
-							diagnostic.code = rule.id;
-							diagnostic.source = 'ReadyOrNot';
-							diagnostics.push(diagnostic);
-							vulnerabilities++;
-						}
-					}
-					ts.forEachChild(node, visit);
-				};
-				visit(sourceFile);
-
-				// Mark these rules as already processed by AST
-				astReportedIds.add('eval-usage');
-				astReportedIds.add('dangerously-set-inner-html');
-			} catch (err) {
-				// Fallback to regex if parsing utterly fails
-			}
-		}
-
-		for (const rule of vulnerabilityRules) {
-			if (astReportedIds.has(rule.id)) continue;
-
-			let match;
-			// Important: reset regex state so it searches from beginning of file
-			rule.regex.lastIndex = 0;
-			while ((match = rule.regex.exec(text)) !== null) {
-				const startPos = document.positionAt(match.index);
-				const endPos = document.positionAt(match.index + match[0].length);
-				const range = new vscode.Range(startPos, endPos);
-
-				const diagnostic = new vscode.Diagnostic(range, rule.message, rule.vscodeSeverity);
-				diagnostic.code = rule.id; // Also maps back to the webview
-				diagnostic.source = 'ReadyOrNot';
-				diagnostics.push(diagnostic);
-				vulnerabilities++;
-			}
 		}
 
 		diagnosticCollection.set(document.uri, diagnostics);
-		return vulnerabilities;
+		return auditReport.vulnerabilities.length;
 	}
 
 	// Command to manually scan workspace
@@ -356,31 +149,44 @@ export function activate(context: vscode.ExtensionContext) {
 					for (const uri of files) {
 						try {
 							const document = await vscode.workspace.openTextDocument(uri);
-							totalVulnerabilities += scanDocument(document);
 
-							// Populate our results array to pass to the Webview
-							const diags = diagnosticCollection.get(uri);
-							if (diags) {
-								for (const d of diags) {
-									// Determine true underlying severity for UI label mapping
-									let truesev = 'Info';
-									if (typeof d.code === 'string') {
-										const matchedRule = vulnerabilityRules.find(r => r.id === d.code);
-										if (matchedRule) {
-											truesev = matchedRule.displaySeverity;
-										} else if (d.code === 'architecture-fragility' || d.code === 'architecture-fragility-db') {
-											truesev = 'Warning';
-										}
-									}
+							const workspaceFile: WorkspaceFile = {
+								uri: document.uri.toString(),
+								fsPath: document.uri.fsPath,
+								content: document.getText()
+							};
 
-									allResults.push({
-										file: vscode.workspace.asRelativePath(uri),
-										line: d.range.start.line + 1,
-										message: d.message,
-										severity: truesev
-									});
-								}
+							const fileReport = await runAudit([workspaceFile]);
+							totalVulnerabilities += fileReport.vulnerabilities.length;
+
+							const diags: vscode.Diagnostic[] = [];
+							for (const finding of fileReport.vulnerabilities) {
+								const lineIndex = Math.max(0, finding.line - 1);
+								if (lineIndex >= document.lineCount) continue;
+
+								const lineText = document.lineAt(lineIndex).text;
+								const range = new vscode.Range(lineIndex, 0, lineIndex, lineText.length || 1);
+
+								let vsSeverity = vscode.DiagnosticSeverity.Information;
+								if (finding.severity === 'ERROR') vsSeverity = vscode.DiagnosticSeverity.Warning;
+								else if (finding.severity === 'WARNING') vsSeverity = vscode.DiagnosticSeverity.Warning;
+
+								const msg = `[${finding.title}] ${finding.description}\nFix: ${finding.recommendation}`;
+								const diagnostic = new vscode.Diagnostic(range, msg, vsSeverity);
+								diagnostic.code = finding.id;
+								diagnostic.source = `ReadyOrNot [${finding.agentSource}]`;
+								diags.push(diagnostic);
+
+								allResults.push({
+									file: vscode.workspace.asRelativePath(uri),
+									line: finding.line,
+									message: `[${finding.title}] ${finding.description}`,
+									severity: finding.severity === 'ERROR' ? 'Error' : finding.severity === 'WARNING' ? 'Warning' : 'Info'
+								});
 							}
+
+							diagnosticCollection.set(uri, diags);
+
 						} catch (e) {
 							console.error(`Error reading file ${uri.fsPath}:`, e);
 						}
