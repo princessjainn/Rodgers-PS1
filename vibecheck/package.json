@@ -1,0 +1,75 @@
+{
+  "name": "ready-or-not",
+  "publisher": "ready-or-not",
+  "displayName": "ReadyOrNot",
+  "description": "Checks if project is production ready",
+  "version": "1.0.0",
+  "author": "Vibecheck Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibecheck/ready-or-not.git"
+  },
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "bin": {
+    "readyornot": "./bin/cli.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "readyornot.scanVulnerabilities",
+        "title": "ReadyOrNot: Open Editor Panel",
+        "icon": "$(shield)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "readyornot.scanVulnerabilities",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "readyornot.scanVulnerabilities",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "readyornot.scanVulnerabilities",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.109.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.39.2",
+    "typescript-eslint": "^8.54.0"
+  },
+  "dependencies": {
+    "ignore": "^7.0.5",
+    "typescript": "^5.9.3"
+  }
+}
